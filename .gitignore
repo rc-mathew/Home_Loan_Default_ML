@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+data/*.csv
+data/*.zip
+artifacts/*
+models/*.joblib

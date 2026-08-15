@@ -1,0 +1,9 @@
+services:
+  home-loan-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_PATH: /app/models/home_loan_default_model.joblib
+      METADATA_PATH: /app/models/metadata.json
+    restart: unless-stopped

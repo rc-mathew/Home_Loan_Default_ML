@@ -1,0 +1,1 @@
+Place the supplied Home Credit CSV files here. The training script reads them from this directory.
