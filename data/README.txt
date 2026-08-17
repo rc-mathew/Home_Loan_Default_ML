@@ -1,1 +1,1 @@
-Place the supplied Home Credit CSV files here. The training script reads them from this directory.
+Put the Home Credit CSV files here locally. Do not commit raw customer-level data to a public repository. Expected: application_train.csv, bureau.csv, bureau_balance.csv, previous_application.csv, POS_CASH_balance.csv, credit_card_balance.csv, installments_payments.csv. The improved pipeline uses bureau_balance.csv in chunked mode.

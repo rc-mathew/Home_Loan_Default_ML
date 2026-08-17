@@ -1,139 +1,281 @@
-# Home Loan Default Risk & Customer Eligibility — End-to-End Deployment
+# Home Loan Default Risk & Customer Eligibility — Production-Ready ML Platform
 
-This repository converts the 8 GB RAM XGBoost notebook into a deployable ML project.
+A memory-conscious, end-to-end credit-risk ML project based on the Home Credit dataset. The project is designed for an **8 GB RAM laptop** while adding the engineering and model-governance pieces expected in an ML Engineer / FinTech portfolio.
+
+> **Important:** This is a portfolio/research system, not a real lending decision engine. Real credit use requires validated data lineage, privacy/security controls, calibration, fairness assessment, policy integration, monitoring, human oversight and regulatory/model-risk governance.
+
+## What was fixed from the earlier version
+
+| Gap | Resolution |
+|---|---|
+| Only a couple of commits | Recommended commit plan below creates meaningful milestones instead of one giant commit. |
+| No visible test coverage | Added unit tests + `pytest-cov`; GitHub Actions publishes a coverage artifact on every push/PR. Do not claim a percentage until CI reports it. |
+| No CI/CD | Added `.github/workflows/ci.yml`. It installs dependencies and runs the test suite with coverage. |
+| No evaluation plots | Training now creates ROC, Precision-Recall and model-comparison plots under `artifacts/`. |
+| Notebook outputs not shown | Notebook remains the development artifact; README documents the exact commands that generate reproducible evaluation artifacts. Do not fabricate metrics before running on the real data. |
+| `bureau_balance.csv` excluded | Added a chunked `bureau_balance` aggregation using only `SK_ID_BUREAU` and `STATUS`, producing compact applicant-level delinquency features while remaining memory-conscious. |
+| Class imbalance not explicit | Added prevalence reporting, `class_weight='balanced'` for Logistic Regression and `scale_pos_weight` for XGBoost. PR-AUC is reported and used as the primary model-selection metric. |
+| Fixed 0.50 threshold | Threshold is selected on validation using F2, then frozen before the untouched test evaluation. |
+| No temporal validation | Added `src/validation.py` and `scripts/temporal_validation.py`. The current Kaggle-style `application_train.csv` has no true application/decision timestamp, so the project **does not falsely claim temporal validation**. When an approved timestamp is available, the chronological split can be executed directly. |
+| Test set used too early | Data is now split into 60% train / 20% validation / 20% untouched holdout test. Model and threshold selection happen on validation; the holdout is evaluated afterward. |
 
 ## Architecture
 
 ```text
-Raw Home Credit CSVs
-        |
-        v
-Memory-efficient feature engineering
-        |
-        v
+Home Credit CSVs
+      |
+      v
+Sequential, memory-conscious feature engineering
+      |
+      v
 Applicant-level feature table
-        |
-        +--> Logistic Regression
-        |
-        +--> XGBoost (hist, CPU, constrained)
-        |
-        v
-Model comparison
-        |
-        v
-Best model artifact (.joblib)
-        |
-        +--> Batch scoring
-        |
-        +--> FastAPI REST API
-        |
-        +--> Docker
+      |
+      +----------------------+----------------------+
+      |                                             |
+      v                                             v
+Logistic Regression                              XGBoost
+balanced baseline                         class-weighted via
+interpretable model                       scale_pos_weight
+      |                                             |
+      +----------------------+----------------------+
+                             v
+                 Validation model selection
+                  PR-AUC -> ROC-AUC tie-break
+                             |
+                      Threshold tuning
+                        (F2 on val)
+                             |
+                             v
+                   Untouched holdout test
+                             |
+               +-------------+-------------+
+               |                           |
+               v                           v
+          Model artifact              Evaluation plots
+               |                           |
+               v                           v
+            FastAPI                 ROC / PR / comparison
+               |
+               v
+       Probability + risk segment
+               |
+               v
+     Monitoring / policy / review
 ```
 
-## Models
-
-- Logistic Regression — interpretable baseline.
-- XGBoost — nonlinear production candidate.
-- XGBoost is the actual `xgboost.XGBClassifier`, configured conservatively for an 8 GB laptop:
-  - `tree_method="hist"`
-  - `max_depth=3`
-  - `n_estimators=120`
-  - `max_bin=64`
-  - `subsample=0.80`
-  - `colsample_bytree=0.70`
-  - `n_jobs=2`
-
-## Feature set
-
-The deployment uses the same compact feature set as the supplied 8 GB notebook: 33 selected numeric features covering application affordability, external risk scores, bureau history, previous applications, POS/Cash, credit cards and installment behavior.
-
-`bureau_balance.csv` is intentionally not expanded in this 8 GB implementation, matching the notebook's resource-constrained design.
-
-## 1. Project structure
+## Repository structure
 
 ```text
-home_loan_default_deployment/
-├── api/
-│   └── main.py
+Home_Loan_Default_ML/
+├── api/main.py
 ├── src/
-│   └── features.py
+│   ├── features.py
+│   ├── metrics.py
+│   └── validation.py
 ├── scripts/
 │   ├── train.py
-│   └── predict_batch.py
+│   ├── evaluate.py
+│   ├── predict_batch.py
+│   └── temporal_validation.py
+├── notebooks/
+│   └── Home_Loan_Default_8GB_XGBoost.ipynb
 ├── tests/
-│   └── test_api.py
-├── data/
-├── models/
+│   ├── test_api.py
+│   ├── test_features.py
+│   └── test_metrics.py
+├── .github/workflows/ci.yml
+├── configs/
 ├── artifacts/
+├── models/
+├── data/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── .env.example
-├── .gitignore
-└── notebooks_Home_Loan_Default_8GB_XGBoost.ipynb
+└── README.md
 ```
 
-## 2. Dataset
+## 1. Data and memory strategy
 
-Place the supplied CSV files in `data/`:
+The historical tables are much larger than the application table. To keep the pipeline viable on an 8 GB laptop:
 
-- application_train.csv
-- bureau.csv
-- bureau_balance.csv (not used by the model in this optimized version)
-- POS_CASH_balance.csv
-- credit_card_balance.csv
-- previous_application.csv
-- installments_payments.csv
+- read only required columns;
+- aggregate one historical source at a time;
+- process `bureau_balance.csv` in chunks;
+- merge only compact applicant-level features;
+- delete intermediate frames and call garbage collection;
+- use `float32` model matrices;
+- use CPU `tree_method='hist'`, shallow trees and `n_jobs=2`.
 
-The training script only reads the selected columns needed for the compact feature set.
+### bureau_balance decision
 
-## 3. Install
+The previous implementation skipped `bureau_balance.csv`. That was a resource-saving shortcut, not a modeling principle. This version uses it in a controlled way:
 
-Windows:
+- `SK_ID_BUREAU` is mapped to `SK_ID_CURR` using a two-column bureau mapping;
+- `STATUS` is converted into a compact delinquency indicator;
+- the file is processed in chunks;
+- applicant-level record count, delinquency rate and delinquency maximum are retained.
+
+If memory becomes tight, the chunk size in `src/features.py` can be reduced from `200_000`.
+
+## 2. Class imbalance
+
+Home Credit default prediction is highly imbalanced. Accuracy alone can therefore be misleading.
+
+The pipeline explicitly records:
+
+- positive/default rate;
+- negative/non-default rate;
+- training class counts;
+- XGBoost `scale_pos_weight = negatives / positives`;
+- Logistic Regression `class_weight='balanced'`;
+- ROC-AUC and PR-AUC;
+- precision, recall and F1;
+- a validation-selected threshold.
+
+PR-AUC is especially useful here because it focuses attention on the quality of the positive/default class under imbalance.
+
+After training, inspect:
+
+```text
+artifacts/class_distribution.json
+models/validation_metrics.csv
+models/holdout_test_metrics.csv
+```
+
+## 3. Train / validation / test design
+
+The pipeline uses:
+
+```text
+60% train
+20% validation
+20% untouched holdout test
+```
+
+The validation set is used to:
+
+1. compare Logistic Regression and XGBoost;
+2. select the model using PR-AUC, with ROC-AUC as a tie-break;
+3. tune the classification threshold using F2.
+
+The holdout test set is evaluated only after these choices are frozen.
+
+The selected model is then refit on the development data (train + validation) for the production artifact. The holdout test remains untouched for the reported evaluation.
+
+## 4. Temporal validation — important limitation
+
+A true temporal split requires a real **application/decision timestamp**. The supplied Home Credit `application_train.csv` does not provide a direct application timestamp suitable for claiming temporal validation.
+
+Therefore this repository intentionally **does not pretend that `SK_ID_CURR`, `DAYS_BIRTH`, or another relative feature is a calendar timestamp**.
+
+When an approved application date is available, run:
+
+```bash
+python scripts/temporal_validation.py --date-column APPLICATION_DATE
+```
+
+The implementation creates chronological train/validation/test periods and reports the boundaries. In an interview, the correct explanation is:
+
+> "The public dataset lacks a true application timestamp, so I did not manufacture temporal validation. I implemented the temporal split interface and would run it on the production application decision date before deployment."
+
+## 5. Train
+
+From the repository root:
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+python scripts/train.py --data-dir data --model-dir models
 ```
 
 Linux/macOS:
 
 ```bash
-python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-## 4. Train
-
-From the project root:
-
-```bash
 python scripts/train.py --data-dir data --model-dir models
 ```
 
-The script:
-
-1. Loads application data.
-2. Sequentially processes historical tables.
-3. Builds applicant-level features.
-4. Splits the data.
-5. Trains Logistic Regression and XGBoost.
-6. Calculates ROC-AUC, PR-AUC, Accuracy, Precision, Recall and F1.
-7. Selects the highest ROC-AUC model.
-8. Refits that model on the full labeled feature matrix.
-9. Saves:
+The training command produces:
 
 ```text
 models/home_loan_default_model.joblib
 models/metadata.json
 models/model_metrics.csv
+models/validation_metrics.csv
+models/holdout_test_metrics.csv
+artifacts/class_distribution.json
+artifacts/roc_curves.png
+artifacts/precision_recall_curves.png
+artifacts/model_comparison.png
 ```
 
-**Important:** The final production artifact is trained only after the validation comparison. For a regulated production system, use a separate untouched validation/test set and a formal model-governance process before deployment.
+### Evaluation artifacts
 
-## 5. Run the API locally
+After running training locally, commit the generated **small, non-sensitive** evaluation images if you want them visible on GitHub:
+
+```bash
+git add artifacts/*.png models/*metrics.csv artifacts/class_distribution.json
+```
+
+Do not commit raw customer data or secrets.
+
+## 6. Tests and coverage
+
+Run locally:
+
+```bash
+pytest --cov=src --cov=api --cov-report=term-missing --cov-report=html
+```
+
+Open:
+
+```text
+htmlcov/index.html
+```
+
+GitHub Actions runs the same coverage command on every push and pull request and stores `coverage.xml` as a workflow artifact.
+
+**Do not put a made-up coverage percentage in the README.** Once the workflow runs, use the reported number/badge if desired.
+
+## 7. CI/CD
+
+The current workflow is continuous integration:
+
+```text
+Push / Pull Request
+        |
+        v
+GitHub Actions
+        |
+        v
+Install dependencies
+        |
+        v
+Run tests + coverage
+```
+
+For a full production CI/CD pipeline, add after the tests:
+
+```text
+Build Docker image
+        |
+Security scan
+        |
+Push image to registry
+        |
+Deploy to staging
+        |
+Smoke test
+        |
+Manual approval
+        |
+Production deployment
+```
+
+This separation is deliberate: a portfolio repository should not automatically deploy an unvalidated credit model to production.
+
+## 8. API
 
 ```bash
 uvicorn api.main:app --reload
@@ -145,176 +287,87 @@ Open:
 http://127.0.0.1:8000/docs
 ```
 
-Useful endpoints:
+Endpoints:
 
 - `GET /health`
 - `GET /metadata`
 - `POST /predict`
 
-## 6. Example API request
-
-The API accepts the compact applicant-level feature vector. Example:
-
-```json
-{
-  "SK_ID_CURR": 100001,
-  "AMT_INCOME_TOTAL": 180000,
-  "AMT_CREDIT": 500000,
-  "AMT_ANNUITY": 25000,
-  "AMT_GOODS_PRICE": 450000,
-  "CNT_CHILDREN": 1,
-  "CNT_FAM_MEMBERS": 3,
-  "DAYS_BIRTH": -14000,
-  "DAYS_EMPLOYED": -3000,
-  "EXT_SOURCE_1": 0.45,
-  "EXT_SOURCE_2": 0.60,
-  "EXT_SOURCE_3": 0.55,
-  "REGION_RATING_CLIENT": 2,
-  "REGION_RATING_CLIENT_W_CITY": 2,
-  "bureau_credit_count": 4,
-  "bureau_AMT_CREDIT_SUM_mean": 300000,
-  "bureau_AMT_CREDIT_SUM_DEBT_mean": 100000,
-  "bureau_AMT_CREDIT_SUM_OVERDUE_max": 0,
-  "previous_application_count": 3,
-  "prev_AMT_CREDIT_mean": 250000,
-  "prev_AMT_APPLICATION_mean": 270000,
-  "pos_SK_DPD_mean": 2,
-  "pos_SK_DPD_DEF_mean": 1,
-  "pos_record_count": 20,
-  "cc_AMT_BALANCE_mean": 50000,
-  "cc_AMT_CREDIT_LIMIT_ACTUAL_mean": 150000,
-  "cc_SK_DPD_mean": 0,
-  "inst_payment_delay_mean": 2,
-  "inst_payment_shortfall_mean": 1000,
-  "installment_record_count": 30
-}
-```
-
-The response contains:
-
-```json
-{
-  "SK_ID_CURR": 100001,
-  "default_probability": 0.123456,
-  "risk_segment": "Eligible / Lower Risk"
-}
-```
-
-The numeric probability above is only an example. It is not a claim about this customer.
-
-## 7. Batch scoring
-
-After training:
-
-```bash
-python scripts/predict_batch.py --data-dir data --model-path models/home_loan_default_model.joblib --output artifacts/predictions.csv
-```
-
-This creates:
-
-```text
-artifacts/predictions.csv
-```
-
-with:
-
-- SK_ID_CURR
-- Predicted_Default_Probability
-- Risk_Segment
-
-## 8. Docker deployment
-
-Build:
+## 9. Docker
 
 ```bash
 docker build -t home-loan-risk-api .
-```
-
-Run:
-
-```bash
 docker run --rm -p 8000:8000 home-loan-risk-api
 ```
 
-Or:
+or:
 
 ```bash
 docker compose up --build
 ```
 
-Then visit:
+## 10. GitHub commit strategy
+
+Do not create meaningless commits just to increase the count. Use commits that represent real engineering milestones.
+
+Recommended history:
 
 ```text
-http://localhost:8000/docs
+1. Initial project structure and README
+2. Add memory-efficient feature engineering
+3. Add Logistic Regression and XGBoost training pipeline
+4. Add class-imbalance handling and threshold tuning
+5. Add holdout evaluation and plots
+6. Add bureau_balance chunked features
+7. Add FastAPI inference service
+8. Add tests and GitHub Actions CI
+9. Add temporal validation framework
+10. Add Docker deployment configuration
 ```
 
-## 9. Production architecture
+Example:
 
-For a real FinTech deployment, extend this prototype to:
-
-```text
-Loan application
-      |
-      v
-API Gateway / Authentication
-      |
-      v
-Feature validation
-      |
-      v
-Feature store / historical feature service
-      |
-      v
-Versioned model artifact
-      |
-      v
-Default probability
-      |
-      v
-Policy engine
-      |
-      +--> Eligible / Lower Risk
-      +--> Manual Review
-      +--> High Risk
-      |
-      v
-Decision logging + monitoring
+```bash
+git add .
+git commit -m "Add memory-efficient feature engineering"
 ```
 
-The model should be a risk signal, not an uncontrolled replacement for underwriting policy.
+Then later:
 
-## 10. Monitoring
+```bash
+git add .
+git commit -m "Add class imbalance handling and holdout evaluation"
+```
 
-Recommended production metrics:
+This gives interviewers a meaningful iteration trail.
 
-- ROC-AUC
-- PR-AUC
-- Population Stability Index / feature drift
-- Prediction distribution drift
-- Realized default rate
-- Approval rate
-- Bad rate by risk segment
-- Calibration
-- Missing-feature rate
-- API latency/error rate
-- Model and feature version lineage
+## 11. Model governance checklist
 
-## 11. Important model-governance considerations
+Before a real lending deployment:
 
-Before using this for real lending:
+- [ ] true temporal validation with application/decision date;
+- [ ] leakage audit;
+- [ ] probability calibration;
+- [ ] threshold/cost analysis;
+- [ ] fairness analysis;
+- [ ] stability/drift monitoring;
+- [ ] champion/challenger model process;
+- [ ] feature/data/model version lineage;
+- [ ] security and privacy controls;
+- [ ] audit logging;
+- [ ] human-review policy;
+- [ ] model-risk approval.
 
-- Validate temporal stability.
-- Ensure no post-decision leakage.
-- Calibrate probabilities.
-- Define an explicit cost matrix for threshold selection.
-- Validate fairness according to applicable law and company policy.
-- Maintain a champion/challenger process.
-- Version datasets, features, model artifacts and code.
-- Keep human review where required.
-- Perform security, privacy and access-control reviews.
+## 12. Interview-ready explanation
 
-## 12. Relationship to the notebook
+**Why XGBoost?** It captures nonlinear interactions and usually provides a stronger tabular baseline than a linear model. The histogram tree method, shallow trees and limited parallelism keep memory/CPU usage reasonable on an 8 GB machine.
 
-The included notebook remains the exploratory/model-development artifact. The `src/`, `scripts/` and `api/` components turn the same modeling concept into a reproducible deployment workflow.
+**Why Logistic Regression?** It is an interpretable, strong baseline and provides a useful comparison against a nonlinear model.
 
-The notebook's 8 GB constraints are preserved: sequential historical aggregation, selected columns, compact feature engineering, numeric-only modeling and constrained XGBoost.
+**How did you handle imbalance?** I measured prevalence, used `class_weight='balanced'` for Logistic Regression and `scale_pos_weight` for XGBoost, reported PR-AUC in addition to ROC-AUC, and selected the operating threshold on validation data rather than blindly using 0.50.
+
+**Why is bureau_balance now included?** The earlier version excluded it to protect 8 GB memory. The improved pipeline processes it in chunks and keeps only compact applicant-level delinquency statistics.
+
+**How did you handle temporal validation?** I did not falsely use an ID or relative date as an application timestamp. The public dataset lacks a suitable decision timestamp, so the repository includes a temporal split interface that can be run as soon as a true application date is available.
+
+**What is the most important production caveat?** The model probability is a risk signal. Lending eligibility must be determined by a governed policy layer using validated thresholds, affordability rules, fairness controls and human review where appropriate.

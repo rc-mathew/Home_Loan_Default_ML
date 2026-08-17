@@ -1,0 +1,1 @@
+Training creates small evaluation artifacts here: roc_curves.png, precision_recall_curves.png, model_comparison.png and class_distribution.json. These may be committed after training if they contain no sensitive data.

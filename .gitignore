@@ -1,9 +1,15 @@
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 venv/
+.env
 .ipynb_checkpoints/
 data/*.csv
 data/*.zip
-artifacts/*
 models/*.joblib
+mlruns/
+artifacts/*
+!artifacts/README.md
+htmlcov/
+.coverage
+coverage.xml
