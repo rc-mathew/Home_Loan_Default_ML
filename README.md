@@ -339,7 +339,7 @@ git add .
 git commit -m "Add class imbalance handling and holdout evaluation"
 ```
 
-This gives interviewers a meaningful iteration trail.
+
 
 ## 11. Model governance checklist
 
@@ -358,16 +358,3 @@ Before a real lending deployment:
 - [ ] human-review policy;
 - [ ] model-risk approval.
 
-## 12. Interview-ready explanation
-
-**Why XGBoost?** It captures nonlinear interactions and usually provides a stronger tabular baseline than a linear model. The histogram tree method, shallow trees and limited parallelism keep memory/CPU usage reasonable on an 8 GB machine.
-
-**Why Logistic Regression?** It is an interpretable, strong baseline and provides a useful comparison against a nonlinear model.
-
-**How did you handle imbalance?** I measured prevalence, used `class_weight='balanced'` for Logistic Regression and `scale_pos_weight` for XGBoost, reported PR-AUC in addition to ROC-AUC, and selected the operating threshold on validation data rather than blindly using 0.50.
-
-**Why is bureau_balance now included?** The earlier version excluded it to protect 8 GB memory. The improved pipeline processes it in chunks and keeps only compact applicant-level delinquency statistics.
-
-**How did you handle temporal validation?** I did not falsely use an ID or relative date as an application timestamp. The public dataset lacks a suitable decision timestamp, so the repository includes a temporal split interface that can be run as soon as a true application date is available.
-
-**What is the most important production caveat?** The model probability is a risk signal. Lending eligibility must be determined by a governed policy layer using validated thresholds, affordability rules, fairness controls and human review where appropriate.
