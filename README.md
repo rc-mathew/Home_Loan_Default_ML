@@ -15,6 +15,14 @@
 
 </div>
 
+> [!IMPORTANT]
+> ### 🌿 You are viewing the `main` branch
+> This branch preserves the **original end-to-end deployment implementation** of the project: the compact 8 GB ML pipeline, Logistic Regression + XGBoost modelling, FastAPI serving, batch inference and Docker packaging.
+>
+> **For the latest and strongest portfolio implementation, switch to [`production-hardening`](../../tree/production-hardening).**
+>
+> The `production-hardening` branch adds stronger train/validation/holdout discipline, explicit class-imbalance handling, chunked `bureau_balance` integration, PR-AUC-aware evaluation, F2 threshold optimization, expanded automated tests, coverage reporting, GitHub Actions CI and a temporal-validation framework.
+
 ---
 
 ## 🎯 Project Overview
@@ -57,7 +65,7 @@ The project is deliberately designed to remain practical on an **8 GB RAM machin
 
 ## 🌿 Repository Branches
 
-This repository intentionally contains **two branches representing two stages of the project**.
+This repository intentionally contains **two branches representing two stages of the project**. The current branch is **`main`**; recruiters and reviewers looking for the most advanced implementation should continue to **`production-hardening`**.
 
 | Branch | Purpose |
 |---|---|
@@ -90,7 +98,10 @@ production-hardening
  └── Temporal-validation framework
 ```
 
-The `production-hardening` branch is the stronger branch for ML Engineer / Data Scientist portfolio review.
+### Recommended branch for technical review
+
+**`production-hardening` is the recommended branch for ML Engineer / Data Scientist portfolio review.**  
+The `main` branch remains useful as the original deployable baseline and makes the engineering progression between the two stages visible.
 
 ---
 
@@ -663,11 +674,7 @@ With coverage:
 pytest --cov=src --cov=api --cov-report=term-missing
 ```
 
-<<<<<<< HEAD
-
-=======
 No test-count or coverage percentage is claimed here until a successful CI run provides the actual evidence.
->>>>>>> 82e9fb3 (Rewrite README with production ML architecture and results)
 
 ---
 
@@ -675,8 +682,6 @@ No test-count or coverage percentage is claimed here until a successful CI run p
 
 The hardened branch contains a GitHub Actions workflow:
 
-<<<<<<< HEAD
-=======
 ```text
 .github/workflows/ci.yml
 ```
@@ -1032,4 +1037,3 @@ The two-branch structure also shows the evolution from an initial deployable ML 
 This repository is intended for **machine-learning engineering, portfolio and educational use**.
 
 The model must not be used as an autonomous real-world lending decision system without appropriate data validation, security controls, probability calibration, fairness assessment, explainability, out-of-time validation, monitoring, regulatory review, policy controls and human oversight.
->>>>>>> 82e9fb3 (Rewrite README with production ML architecture and results)
